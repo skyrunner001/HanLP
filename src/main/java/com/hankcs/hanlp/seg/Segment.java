@@ -143,7 +143,7 @@ public abstract class Segment
     protected static List<AtomNode> simpleAtomSegment(char[] charArray, int start, int end)
     {
         List<AtomNode> atomNodeList = new LinkedList<AtomNode>();
-        atomNodeList.add(new AtomNode(new String(charArray, start, end - start), Predefine.CT_LETTER));
+        atomNodeList.add(new AtomNode(new String(charArray, start, end - start), CharType.CT_LETTER));
         return atomNodeList;
     }
 
@@ -167,12 +167,15 @@ public abstract class Segment
             if (curType != preType)
             {
                 // 浮点数识别
-                if (charArray[offsetAtom] == '.' && preType == CharType.CT_NUM)
+                if ((charArray[offsetAtom] == '.' || charArray[offsetAtom] == '．') && preType == CharType.CT_NUM)
                 {
-                    while (++offsetAtom < end)
+                    if (offsetAtom+1 < end)
                     {
-                        curType = CharType.get(charArray[offsetAtom]);
-                        if (curType != CharType.CT_NUM) break;
+                        int nextType = CharType.get(charArray[offsetAtom+1]);
+                        if (nextType == CharType.CT_NUM) 
+                        {
+                            continue;
+                        }
                     }
                 }
                 atomNodeList.add(new AtomNode(new String(charArray, start, offsetAtom - start), preType));
@@ -193,11 +196,13 @@ public abstract class Segment
      */
     protected static List<Vertex> combineByCustomDictionary(List<Vertex> vertexList)
     {
+        assert vertexList.size() > 2 : "vertexList至少包含 始##始 和 末##末";
         Vertex[] wordNet = new Vertex[vertexList.size()];
         vertexList.toArray(wordNet);
         // DAT合并
         DoubleArrayTrie<CoreDictionary.Attribute> dat = CustomDictionary.dat;
-        for (int i = 0; i < wordNet.length; ++i)
+        int length = wordNet.length - 1; // 跳过首尾
+        for (int i = 1; i < length; ++i)
         {
             int state = 1;
             state = dat.transition(wordNet[i].realWord, state);
@@ -206,7 +211,7 @@ public abstract class Segment
                 int to = i + 1;
                 int end = to;
                 CoreDictionary.Attribute value = dat.output(state);
-                for (; to < wordNet.length; ++to)
+                for (; to < length; ++to)
                 {
                     state = dat.transition(wordNet[to].realWord, state);
                     if (state < 0) break;
@@ -227,7 +232,7 @@ public abstract class Segment
         // BinTrie合并
         if (CustomDictionary.trie != null)
         {
-            for (int i = 0; i < wordNet.length; ++i)
+            for (int i = 1; i < length; ++i)
             {
                 if (wordNet[i] == null) continue;
                 BaseNode<CoreDictionary.Attribute> state = CustomDictionary.trie.transition(wordNet[i].realWord.toCharArray(), 0);
@@ -236,7 +241,7 @@ public abstract class Segment
                     int to = i + 1;
                     int end = to;
                     CoreDictionary.Attribute value = state.getValue();
-                    for (; to < wordNet.length; ++to)
+                    for (; to < length; ++to)
                     {
                         if (wordNet[to] == null) continue;
                         state = state.transition(wordNet[to].realWord.toCharArray(), 0);
@@ -619,6 +624,25 @@ public abstract class Segment
     }
 
     /**
+     * 是否尽可能强制使用用户词典（使用户词典的优先级尽可能高）<br>
+     *     警告：具体实现由各子类决定，可能会破坏分词器的统计特性（例如，如果用户词典
+     *     含有“和服”，则“商品和服务”的分词结果可能会被用户词典的高优先级影响）。
+     * @param enable
+     * @return 分词器本身
+     *
+     * @since 1.3.5
+     */
+    public Segment enableCustomDictionaryForcing(boolean enable)
+    {
+        if (enable)
+        {
+            enableCustomDictionary(true);
+        }
+        config.forceCustomDictionary = enable;
+        return this;
+    }
+
+    /**
      * 是否启用音译人名识别
      *
      * @param enable
@@ -710,12 +734,12 @@ public abstract class Segment
 
     /**
      * 开启多线程
-     * @param enable true表示开启4个线程，false表示单线程
+     * @param enable true表示开启[系统CPU核心数]个线程，false表示单线程
      * @return
      */
     public Segment enableMultithreading(boolean enable)
     {
-        if (enable) config.threadNumber = 4;
+        if (enable) config.threadNumber = Runtime.getRuntime().availableProcessors();
         else config.threadNumber = 1;
         return this;
     }
